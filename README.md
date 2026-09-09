@@ -4,6 +4,6 @@ Apuntes, resúmenes, prácticos, labs y demás psicosis colectivas de estudiante
 
 Formato de Carpetas:
 
-<span style="color:red">"nm_NombreDeLaMateria"</span>
+"$${\color{blue}n}$$$${\color{red}m}$$_NombreDeLaMateria"
 
-con n año de carrera (1,2,3,4,5), m cuatrimestre (1, 2)
+con $${\color{blue}n}$$ año de carrera (1,2,3,4,5), $${\color{red}m}$$ cuatrimestre (1, 2)
