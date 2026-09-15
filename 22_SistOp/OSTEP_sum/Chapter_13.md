@@ -1,94 +1,76 @@
-## The Abstraction: Addres Space
+## The Abstraction: Address Spaces
 # Chapter 13
 
 # Key words
+- Address Space
+- Virtual Address
+- Physical Address
+- Virtual Address Space
+- Physical Memory
 - Multiprogramming
-- TSS time share system (time sharing)
-- Relocalizable
-- Fragmentacion extrema
+- Time Sharing
+- Process
+- Code Segment
+- Heap Segment
+- Stack Segment
+- Transparency
+- Efficiency
+- Protection
 - Isolation
-- Transparency
-- Politica
-- Mecanismo
-- Segmentacion
+- Virtualizacion de la Memoria
 
+# Conceptos de Hardware
+- Physical Memory
+- Disk
+- Register
 
-antes, esta era la distribucion de la memoria
-0____________
-|    OS     |
--------------
-|           |
-_____________<-- 0xFA84(ej)
-|    prg1   |   Se programaba en absoluto y
--------------   en codigo maquina
-|           |---> Initial Orders
-_____________               |---> Automatic prog (compilar)
-|    prd2   |
--------------
-|           |
-Max----------
+# Idea General
 
-`¿Que necesito?`
-- Seguridad
-- Relocalizacion
-- Performance
+`¿Como logra el sistema operativo darle a cada programa la ilusion de tener su propia memoria privada?`
+El sistema operativo crea una abstraccion llamada *Address Space*, que es la vision que tiene un programa en ejecucion de la memoria del sistema. Detras de esta ilusion, el SO (con ayuda del hardware) traduce las direcciones virtuales que genera el programa en direcciones fisicas reales, multiplexando la memoria fisica entre varios procesos al mismo tiempo.
 
--En este momento, no existia la *multiprogramming*
--Se crea TSS time share
-        `|-->` comienzas a existir problemas de seguridad
-los programas estaban armados segun su direccion de memoria, si se mezclaban y cambiaban las direcciones de memoria se generaban problemas (los programas no eran relocalizables)
--Si los programas [no] son [relocalizables], y yo quiero que los programas solo vayan a los espacios vacios <-- IMPOSIBLE
-        `|-->` se necesitan tablas de relocalizacion
--En [multiprogramming] los programas deben ser coperativos
-        `|-->` un acuerdo de que todos los programas funcionan
-        bien y no salen de su espacio de memoria
--Para contemplar los casos de programas que funcionan mal, se solia tomar una desicion de dise;o con Bare Metal
--El software no puede garantizar que los programas no se pisen
-    [los programas estan bien, el problema es el compilador]
+# Repaso teorico
 
-0KB----------       0KB----------
-|   code    |       |   code    |  *brk()* ampliaba la memoria
--------------       -------------   para abajo del stack
-|    heap   |       |    stack  | pero el heap no estaba ahi
--------------       -------------   y nada accedia a esa mem
-|           |       |    heap   |
-|           | --->  -----------*brk()* ahora stack esta limitado
-|           |       |           |   pero el heap tiene todo el
--------------       |           |   espacio que tiene
-|    stack  |       |           |
-nKB---------*brk()* nKB---------
+[13.1]`Los primeros sistemas`
+En las primeras computadoras no existia una verdadera abstraccion de memoria
+- El SO era una biblioteca de rutinas ubicada al comienzo de la memoria fisica (por ejemplo, desde la direccion 0)
+- Un unico proceso ocupaba el resto de la memoria fisica
+*No habia ilusion alguna: el usuario veia la memoria fisica tal cual era*
 
-*Memoria normal*
-m[1]
-*Memoria virtual*
-m[v(1)]
+[13.2]`Multiprogramacion y Time Sharing`
+Con el tiempo, las maquinas eran costosas y se busco compartirlas de forma mas eficiente
+- *Multiprogramacion*: varios procesos listos para ejecutar, el SO cambia entre ellos (por ejemplo cuando uno hace I/O), aumentando el aprovechamiento de la CPU
+- *Time Sharing*: fue un paso mas alla, permitiendo que muchos usuarios interactuaran con la maquina al mismo tiempo, esperando respuestas rapidas
+Una primera forma de implementar time sharing era correr un proceso, guardar todo su estado (incluida toda la memoria) en disco, cargar el de otro proceso, y repetir
+- *Problema*: guardar toda la memoria en disco es demasiado lento
+La solucion fue dejar los procesos en memoria mientras se cambia entre ellos, lo cual exige resolver el problema de la *proteccion*: evitar que un proceso lea o escriba la memoria de otro
 
-`El SO debe ser`
-- Eficiente
-- Transparency
-- Seguro
-- Insolado
+[13.3]`El Address Space`
+Se define el *Address Space* como la vision que tiene un programa en ejecucion de la memoria del sistema
+Contiene todo el estado de memoria del programa:
+- *Code*: las instrucciones del programa (parte estatica, tamaño fijo, no crece)
+- *Stack*: lleva registro de en que punto de la cadena de llamadas a funciones esta el programa; alli se guardan variables locales, parametros y valores de retorno
+- *Heap*: memoria dinamica administrada por el usuario (la que se obtiene con malloc() en C o new en lenguajes orientados a objetos)
+Convencionalmente, el codigo se ubica al principio del address space, el heap justo despues (creciendo hacia abajo) y el stack al final (creciendo hacia arriba), dejando espacio libre entre ambos para que puedan crecer
+*Importante: el programa no esta realmente en las direcciones 0 a N; esas direcciones son virtuales y el SO decide en que parte de la memoria fisica se cargan realmente*
 
-# Notas de clase
+`EL CRUX: COMO VIRTUALIZAR LA MEMORIA`
+¿Como puede el SO construir esta abstraccion de un address space privado y potencialmente grande para multiples procesos en ejecucion, todos compartiendo una unica memoria fisica?
+Cuando el SO hace esto decimos que esta *virtualizando la memoria*: el programa cree estar cargado en una direccion particular (por ejemplo 0) y tener un espacio de direcciones grande, pero la realidad fisica es completamente distinta.
 
-[tiempo de funcionamiendo correcto]
-antes las pc tenian un 30% de tiempo de falla (no anda) la tasa de andar era del 70% del tiempo (correr programas decentemente)
-*compus de n nueves*
-99% -> anda el 99% del tiempo
-99.9999% -> anda casi todo el tiempo
+[13.4]`Objetivos de la Virtualizacion de Memoria (VM)`
+- *Transparencia*: el SO debe implementar la memoria virtual de forma invisible para el programa; el programa se comporta como si tuviera su propia memoria fisica privada
+- *Eficiencia*: la virtualizacion debe ser eficiente tanto en tiempo (no hacer mas lentos a los programas) como en espacio (no gastar demasiada memoria en estructuras de soporte); para lograrlo se necesita soporte de hardware (por ejemplo TLBs)
+- *Proteccion*: el SO debe asegurar que ningun proceso pueda acceder o afectar la memoria de otro proceso ni la del propio SO
 
-[z1/2/3] compus alemanas de la Alemania nazi (primeras compus)
+*Principio de Aislamiento (Isolation)*
+- Si dos entidades estan correctamente aisladas, una puede fallar sin afectar a la otra
+- El SO aisla los procesos entre si y protege al propio SO de los procesos
+- Algunos SO modernos (microkernels) llevan el aislamiento mas alla, separando incluso partes del SO entre si
 
-un procesador solo de por si no es una pc, necesita tener RAM
-
-malloc() y free() [no] son system calls, son library calls, existe brk() que amplia el techo de memoria de los programas (amlia el espacio de memoria)
-
-Los programas actuales no suelen ser recursivos ya que el stack esta limitado [ULIMIT -s] define el limite del stack
-
-Agrega dos registros, [base] y [limit]
-Ahora a toda direc que emita el programa cuando corre, se le va a sumar la base. Eso lleva el programa de memoria virtual a fisica
-
-Con este regsstro base puedo relocalizar el programa, solucionando el problema de relozalizar.
-Basicamente se agrega una capa mas de abstraccion e interaccion
-
-
+[13.5]`Resumen`
+Se introduce la memoria virtual como una de las abstracciones principales del SO
+- El address space contiene todas las instrucciones y datos de un programa, referenciados mediante direcciones virtuales
+- El SO, con ayuda del hardware, traduce esas direcciones virtuales en direcciones fisicas reales
+- Esto se hace para muchos procesos a la vez, protegiendolos entre si y protegiendo al SO
+*Toda direccion que un programa de usuario puede ver (por ejemplo, al imprimir un puntero) es una direccion virtual; solo el SO y el hardware conocen la verdadera ubicacion fisica*
