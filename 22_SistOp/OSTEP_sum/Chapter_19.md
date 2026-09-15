@@ -74,7 +74,7 @@ Arreglo de 10 enteros (4 bytes c/u), address space de 8 bits, paginas de 16 byte
 
 
 [19.5]`Problema: Context Switches`
-Las traducciones del TLB solo son validas para el proceso que las genero. Si no se hace nada, un proceso podria usar por error traducciones de otro proceso (mismo VPN, distinto PFN)
+Las traducciones del TLB solo son validas para el proceso que las genero. Si no se hace nada, un proceso podria usar por error traducciones de otro proceso (mismo VPN, distintols )
 - **Solucion 1: flush del TLB en cada context switch** — se marcan todas las entradas como invalidas
   - *Costo*: el nuevo proceso sufrira muchos TLB misses al arrancar
 - **Solucion 2: Address Space Identifier (ASID)** — se agrega un campo ASID a cada entrada, permitiendo que el TLB guarde traducciones de varios procesos simultaneamente sin confundirlas
