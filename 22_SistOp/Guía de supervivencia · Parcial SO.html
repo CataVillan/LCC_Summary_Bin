@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Guía de supervivencia · Parcial SO (CPU + Memoria Virtual)</title>
+<style>
+:root{--bg:#fafaf7;--fg:#1d1d1b;--mut:#66665f;--card:#fff;--bd:#e2e0d8;--ac:#b4451f;--tip:#fff4e5;--code:#f0eee6;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#171716;--fg:#ecebe6;--mut:#a3a29a;--card:#211f1d;--bd:#36332f;--ac:#f08a5d;--tip:#2e2419;--code:#2a2825}}
+:root[data-theme="dark"]{--bg:#171716;--fg:#ecebe6;--mut:#a3a29a;--card:#211f1d;--bd:#36332f;--ac:#f08a5d;--tip:#2e2419;--code:#2a2825}
+html{scroll-padding-top:env(safe-area-inset-top,0px);scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 Georgia,'Times New Roman',serif}
+main{max-width:780px;margin:auto;padding:20px 16px 60px}
+h1{font-size:2rem;line-height:1.2;margin:.2em 0}
+h2{font-size:1.45rem;margin:2.2em 0 .5em;border-bottom:2px solid var(--ac);padding-bottom:.2em}
+h3{font-size:1.05rem;margin:1.4em 0 .3em;color:var(--ac);font-family:system-ui,sans-serif}
+p,li{margin:.35em 0}
+code{background:var(--code);padding:.05em .35em;border-radius:4px;font:.9em ui-monospace,Menlo,monospace}
+.sub{color:var(--mut)}
+nav{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+nav a{font:.85rem system-ui,sans-serif;padding:5px 12px;border:1px solid var(--bd);border-radius:99px;color:var(--fg);text-decoration:none;background:var(--card)}
+.tip,.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:10px 14px;margin:12px 0}
+.tip{background:var(--tip);border-left:4px solid var(--ac)}
+.tip b:first-child{font-family:system-ui,sans-serif;color:var(--ac)}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.93rem}
+td,th{border:1px solid var(--bd);padding:5px 8px;text-align:left;vertical-align:top}
+th{background:var(--code)}
+.vf b.v{color:#2f8f4e}.vf b.f{color:#c0392b}
+</style></head><body><main>
+<h1>Guía de supervivencia para el parcial de SO</h1>
+<p class="sub">Virtualización de CPU + Memoria Virtual · Basada en los prácticos 2020 y el resumen de OSTEP. Son <b>claves y trucos</b>, no resoluciones: la promesa del profe es que quien resuelve la guía solo, aprueba. Usá esto para chequear que no te olvidás nada.</p>
+<nav><a href="#meta">Método</a><a href="#mec">Mecanismos</a><a href="#pol">Políticas</a><a href="#api">API memoria</a><a href="#trad">Traducción</a><a href="#pag">Paginación</a><a href="#vf">Verdadero/Falso</a><a href="#plan">Plan</a></nav>
+
+<h2 id="meta">0. Reglas de oro para el examen</h2>
+<ul>
+<li><b>Escribí la fórmula antes de los números.</b> Cuesta puntos hacer bien la cuenta con la fórmula equivocada.</li>
+<li><b>Declará tus convenciones</b> (desempates en RR, si una llegada entra antes que el proceso desalojado, KiB vs KB). Si es coherente, se acepta.</li>
+<li><b>Dibujá siempre</b> la línea de tiempo / la tabla de páginas / el split de bits. La mayoría de los errores son de bookkeeping, no de concepto.</li>
+<li>En V/F la nota está en el <b>"porque"</b>. Una frase con el mecanismo (trap, bit de validez, COW…) vale más que un "verdadero".</li>
+<li>Potencias: 4 KiB = 2<sup>12</sup>, 4 MiB = 2<sup>22</sup>, 4 GiB = 2<sup>32</sup>. Hex: cada dígito = 4 bits.</li>
+</ul>
+
+<h2 id="mec">1. Virtualización de CPU: mecanismos</h2>
+<h3>Tiempos: real, user, sys (Ej. 1–3)</h3>
+<div class="card">
+<b>real</b> = reloj de pared · <b>user+sys</b> = CPU efectivamente consumida.<br>
+<b>real &gt; user</b>: el proceso esperó (cola de ready por falta de núcleos, IO, otro proceso).<br>
+<b>real ≈ user</b>: un solo hilo CPU-bound con un núcleo para él solo.<br>
+<b>real &lt; user</b>: varios hilos corriendo <i>en paralelo</i> en varios núcleos (dgemm).
+</div>
+<div class="tip"><b>Truco núcleos:</b> con <i>n</i> procesos CPU-bound idénticos y <i>c</i> núcleos, real ≈ user · n/c cuando n &gt; c, y real ≈ user cuando n ≤ c. Buscá la corrida donde el real empieza a crecer: ahí superaste los núcleos. Si <b>una sola instancia</b> tiene real &gt; user, algo <i>externo</i> le está robando CPU (otra carga en el sistema). Anotá eso en "Descripción".</div>
+<p>Sí, <code>user+sys &lt; real</code> es posible (IO o espera). <code>user+sys &gt; real</code> también, con hilos.</p>
+
+<h3>fork / exec / wait (Ej. 4–9)</h3>
+<ul>
+<li><b>fork</b> copia el espacio de direcciones (lógicamente; en la práctica COW). Padre e hijo tienen <code>x</code> <b>independientes</b>: cada uno cambia la suya. Si <code>x</code> está en un registro, da igual: los registros también se copian/guardan por proceso.</li>
+<li>Retorno: hijo → <code>0</code>, padre → PID del hijo, error → <code>-1</code>. Que el hijo vea 0 es una <i>convención</i>, no consecuencia de "nadie tiene PID 0".</li>
+<li><b>exec</b> reemplaza código, datos, heap y stack; <b>no retorna</b> salvo error. Lo que sigue a <code>execv()</code> corre solo si falló (Ej. 6: el "a" no se imprime).</li>
+<li><b>Contar "a" con forks (Ej. 5):</b> imprimí, contá procesos que hay en cada printf. Con <i>n</i> forks: 1+2+4+…+2<sup>n</sup> = <b>2<sup>n+1</sup>−1</b>. <b>Trampa:</b> si stdout va a un archivo/pipe, el buffer (full buffering) se duplica con el fork y el resultado cambia; ahí cada uno de los 2<sup>n</sup> procesos finales vuelca todo su historial.</li>
+<li><b>Ej. 7:</b> mirá qué hace <code>argv[argc-1]=NULL</code> con la lista de argumentos y quién hace el <code>execvp</code> (y quién termina antes). Simulá con <code>./prog echo hola mundo</code>.</li>
+<li><b>Ej. 8 (dup):</b> los descriptores se heredan por fork y <b>sobreviven a exec</b>; <code>open</code>/<code>dup</code> devuelven el <b>menor fd libre</b>. Por eso el shell hace fork → (redirige fds en el hijo) → exec. Separar fork y exec es lo que permite redirigir sin tocar al padre: no es mal diseño, es la clave.</li>
+<li><b>Fork bomb:</b> duplica procesos exponencialmente hasta llenar la tabla de procesos/memoria. Mitigación: límites por usuario (<code>ulimit -u</code>), cgroups (pids.max), cuotas.</li>
+<li><b>Zombie:</b> hijo terminado cuyo padre no hizo <code>wait()</code>; sigue en la tabla de procesos guardando el exit status. Si el padre muere, los hijos son adoptados por init (no mueren).</li>
+</ul>
+
+<h3>Limited Direct Execution (Ej. 10–12)</h3>
+<ul>
+<li>El proceso corre <b>directo en la CPU</b> (eficiencia) pero en <b>modo usuario</b> (control). Instrucciones privilegiadas (I/O, modificar base/bounds, tabla de traps, CR3) → excepción si las usa.</li>
+<li>Sin timer interrupt no hay control: un <code>while(1)</code> se queda con la CPU. La <b>tabla de traps</b> se configura al boot en modo kernel.</li>
+<li><b>Dos guardados de registros en un cambio de contexto por timer:</b> (1) el <b>hardware</b> guarda registros de usuario en el kernel stack al entrar al trap; (2) el <b>software</b> (<code>swtch</code>) guarda los registros del kernel en la struct context del proceso.</li>
+<li><b>trapframe xv6 (Ej. 11):</b> el <b>hardware</b> apila ss, esp (solo si cambia de privilegio), eflags, cs, eip (+ error code en algunas excepciones). El <b>software</b> apila lo demás: trapno (vectors.S), ds, es, fs, gs y los registros generales (<code>pushal</code>) en <code>alltraps</code>.</li>
+<li><b>Ej. 10, quitar una flecha del diagrama de estados:</b> sin <i>Ready→Running</i>: nada se ejecuta. Sin <i>Running→Ready</i>: no hay apropiación, un proceso monopoliza la CPU. Sin <i>Running→Blocked</i>: el proceso hace busy-wait en IO desperdiciando CPU. Sin <i>Blocked→Ready</i>: los procesos que piden IO nunca despiertan.</li>
+</ul>
+
+<h2 id="pol">2. Políticas de planificación</h2>
+<div class="card">
+<b>T<sub>turnaround</sub> = T<sub>completion</sub> − T<sub>arrival</sub></b><br>
+<b>T<sub>response</sub> = T<sub>firstrun</sub> − T<sub>arrival</sub></b><br>
+Ambos <b>desde la llegada</b>, no desde 0. Es el error #1.
+</div>
+<div class="tw"><table>
+<tr><th>Política</th><th>Idea</th><th>Bueno en</th><th>Malo en</th></tr>
+<tr><td>FCFS</td><td>orden de llegada</td><td>simple</td><td>efecto convoy</td></tr>
+<tr><td>SJF</td><td>el más corto primero (no apropiativo)</td><td>turnaround (óptimo si todos llegan juntos)</td><td>si el largo llega primero; response; starvation</td></tr>
+<tr><td>STCF</td><td>SJF apropiativo: corre el de menor tiempo <i>restante</i></td><td>turnaround</td><td>response</td></tr>
+<tr><td>RR (Q)</td><td>rota cada Q</td><td>response</td><td>turnaround (Q chico + costo de switch)</td></tr>
+<tr><td>MLFQ</td><td>colas con prioridad, aprende de la historia</td><td>ambos, sin saber T<sub>CPU</sub></td><td>gaming, starvation sin boost</td></tr>
+</table></div>
+<ul>
+<li><b>Ej. 15:</b> lotes = FCFS, SJF, STCF. Interactivas = RR, MLFQ. <b>Necesitan conocer el TCPU de antemano</b>: SJF y STCF. FCFS, RR y MLFQ no (MLFQ lo estima con la historia).</li>
+<li><b>Ej. 13:</b> con llegada 0 para todos, FCFS orden A,B,C; SJF orden C,B,A. Comparalos: el turnaround promedio baja mucho, el response de FCFS = tiempo de espera.</li>
+<li><b>Ej. 14 (STCF/RR):</b> en cada instante en que llega alguien, reevaluá. Anotá la regla de desempate de RR (lo habitual: el que llega entra a la cola <i>antes</i> que el que se desaloja en ese mismo instante).</li>
+<li><b>Ej. 16 (IO):</b> mientras un proceso hace IO está <b>bloqueado</b>, no ocupa la CPU ni está en la cola de ready. Al terminar el IO vuelve al final de la cola. La CPU no queda ociosa si hay otros en ready. Marcá los tramos de IO con otra trama en el diagrama.</li>
+<li><b>Ej. 17 (MLFQ, 4 colas Q=1,2,4,8):</b> reglas: (1) mayor prioridad corre primero; (2) igual prioridad → RR; (3) trabajo nuevo entra en la cola <b>más alta</b>; (4) si agota su quantum en la cola, <b>baja</b>; si suelta la CPU antes, se queda (versión mejorada: se acumula el tiempo total por nivel y no importa cuántas veces hizo yield); (5) boost periódico sube todos a la cima. Un trabajo nuevo <b>apropia</b> al que está en cola inferior.</li>
+</ul>
+<div class="tip"><b>Chequeo rápido:</b> la suma de los ancho de tramos en tu diagrama debe dar la suma de los TCPU (si no hay huecos). Si hay hueco, ¿llegó alguien más tarde o estaban todos en IO?</div>
+
+<h2 id="api">3. API de memoria</h2>
+<ul>
+<li><b>Ej. 1:</b> globales (<code>a</code>) → segmento de <b>datos</b> (.data / .bss), no stack ni heap. Un global inicializado a cero suele ir a <b>.bss</b> (no ocupa espacio en el ejecutable). Locales (<code>i</code>, <code>argc</code>, <code>argv</code>) → <b>stack</b>. <code>register int s</code> → un <b>registro</b>, no tiene dirección. <code>b</code> (el puntero) vive en el <b>stack</b> y <b>apunta al heap</b>. El código va en el segmento de código.</li>
+<li><b>Ej. 2, bugs a cazar:</b> <code>gets</code> no tiene límite (buffer overflow; usar <code>fgets</code>). <code>malloc(strlen(s))</code> olvida el <code>+1</code> del <code>'\0'</code>. <code>d = strdup(s)</code> tras un malloc pisa el puntero: <b>memory leak</b>. <code>malloc(16)</code> son 16 <i>bytes</i>, no 16 ints: <code>a[15]</code> es out-of-bounds. Además: falta el <code>;</code> y <code>sizeof</code>.</li>
+<li><b>malloc/free (Ej. 3):</b> son <b>funciones de biblioteca</b>, no syscalls. Solo <i>a veces</i> llaman a <code>brk/sbrk</code> o <code>mmap</code> (cuando se les acaba el heap) y <code>free</code> a veces a <code>munmap</code>. El tiempo <b>no</b> es proporcional a x (depende de la lista de libres).</li>
+</ul>
+
+<h2 id="trad">4. Traducción de direcciones</h2>
+<h3>Base + bounds</h3>
+<ul>
+<li>Física = base + virtual, y antes se verifica <code>virtual &lt; bounds</code>. <b>Con bounds=256 la dirección 256 ya es inválida.</b></li>
+<li><b>Ej. 4:</b> tené en cuenta que <b>cada fetch de instrucción también es un acceso a memoria</b> (a base + PC), además de los loads/stores. Recorré las 5 instrucciones y fijate qué pasa cuando <code>%ebx</code> se duplica.</li>
+<li><b>Fragmentación interna:</b> espacio desperdiciado <i>dentro</i> de la región asignada (el hueco stack–heap sin usar en cada proceso). <b>Externa:</b> hay memoria libre total suficiente pero en huecos no contiguos chicos.</li>
+<li><b>Relocalización estática:</b> el loader reescribe direcciones al cargar (sin protección, no se puede mover después). <b>Dinámica:</b> el hardware suma base en cada acceso (protege y permite mover).</li>
+<li>Modificar base/bounds es <b>privilegiado</b>. Hardware: un par por CPU; el SO guarda/restaura los valores de cada proceso (en su PCB) en el context switch.</li>
+</ul>
+<h3>Segmentos con páginas (Ej. 8) y espacio libre (Ej. 9)</h3>
+<div class="tip"><b>Ej. 8:</b> redondeá <b>cada segmento hacia arriba</b> a múltiplo de página (no se mezclan tipos), sumá páginas y compará con las que hay (65536 / tamaño de página). Comparé el caso 4 KiB vs 512 B: la fragmentación interna cambia todo.</div>
+<ul>
+<li><b>First fit:</b> primer hueco que alcanza. <b>Best:</b> el más chico que alcanza. <b>Worst:</b> el más grande. <b>Next:</b> como first pero <i>continuando desde donde quedó</i> la última búsqueda.</li>
+<li><b>Trampa:</b> tras cada asignación el hueco <b>se achica</b> (queda el resto), y ese resto puede servir a la siguiente solicitud. Actualizá la lista en cada paso.</li>
+</ul>
+
+<h2 id="pag">5. Paginación</h2>
+<div class="card">
+<b>Split:</b> VPN = dir &gt;&gt; 12 · offset = dir &amp; 0xFFF. Física = frame · 4096 + offset.<br>
+<b>i386 (10,10,12):</b> PDX = dir &gt;&gt; 22 · PTX = (dir &gt;&gt; 12) &amp; 0x3FF · offset = dir &amp; 0xFFF.<br>
+<b>Siempre</b> mirá el bit de validez/presente antes: si es 0 → <b>page fault</b>, no hay dirección física.
+</div>
+<ul>
+<li><b>Ej. 10 (EAT):</b> acierto TLB = t<sub>TLB</sub> + t<sub>mem</sub>. Fallo con tabla lineal = t<sub>TLB</sub> + t<sub>mem</sub> (tabla) + t<sub>mem</sub> (dato). EAT = 0,95·acierto + 0,05·fallo. Da 136 ns.</li>
+<li><b>Ej. 11 (TLB):</b> falla en cada iteración si el paso salta de página en cada acceso (M·4 B ≥ 4096) <b>y</b> se tocan más de 64 páginas distintas (con LRU/FIFO se expulsan justo antes de reusarse). Si el ciclo se repite y todo entra en 64 entradas, tras la primera pasada solo quedan aciertos.</li>
+<li><b>Ej. 12:</b> 16 páginas virtuales · 4 KiB = 16 bits virtuales; frames de 3 bits → 15 bits físicos. Para el mapeo inverso, <b>no es único</b>: dos páginas virtuales pueden apuntar al mismo frame (ej.: páginas 4 y 10 → frame 100). Dá todas las válidas.</li>
+<li><b>Ej. 13:</b> separá los hex en (PDX, PTX, offset) con las máscaras de arriba, seguí CR3 → PD[PDX] → PT[PTX] → frame + offset.</li>
+<li><b>Ej. 14:</b> una PT (1024 entradas de 4 B) ocupa 4 KiB y mapea 4 MiB. (a) 32 MiB = 8 PT + 1 PD = 36 KiB. (b) 1024 PT + 1 PD = 4 MiB + 4 KiB. (c) Una tabla lineal de 2<sup>20</sup> entradas ocupa <b>siempre 4 MiB</b>: con todo mapeado 2 niveles cuesta 4 KiB de más, pero con espacios <i>ralos</i> (lo normal) 2 niveles ahorra muchísimo. (d) 0–4 MiB: PD[0] → 1 PT con 1024 entradas; 8 MiB: PD[2] → PT con 8 entradas que apuntan a frames 128 MiB/4 KiB = 32768…; el resto, no presente.</li>
+<li><b>Ej. 15:</b> las tablas también ocupan frames físicos; mapear los 4 GiB completos consume 1025 frames de tablas, así que no queda para el resto. Máximo ≈ 2<sup>20</sup> − 1025 páginas de datos.</li>
+<li><b>Ej. 16 (PAE):</b> entradas de 8 bytes (para direccionar 36 bits) → 512 entradas por tabla, 3 niveles (2,9,9,12) con un PDPT; cada proceso sigue viendo 4 GiB pero el SO reparte frames de 64 GiB entre todos.</li>
+<li><b>Ej. 18 (recursive page table):</b> PD[1023] = el propio PD, entonces al caminar dos niveles se "pierde" uno. <code>0xFFC00000</code> → PDX=1023, PTX=0 → apunta a la <b>primera page table</b>. <code>0xFFFE0000</code> → PTX=992 → la page table nº 992. <code>0xFFFFF000</code> → PDX=PTX=1023 → el <b>page directory</b> mismo. Sirve para que el kernel lea/escriba las page tables (y el PD) con direcciones virtuales normales, sin mapeos aparte.</li>
+</ul>
+
+<h3>Ej. 19: paginación como herramienta (una línea de mecanismo por cada una)</h3>
+<div class="tw"><table>
+<tr><th>Técnica</th><th>Mecanismo</th></tr>
+<tr><td>NULL falla</td><td>La página 0 no se mapea (inválida) → page fault → SIGSEGV.</td></tr>
+<tr><td>Swap</td><td>Bit present=0 + dirección en disco; el fault trae la página y actualiza la PTE.</td></tr>
+<tr><td>Demand paging</td><td>El ejecutable se mapea como inválido; se carga cada página al primer fault.</td></tr>
+<tr><td>Stack auto-growing</td><td>Fault cerca del tope del stack (guard) → el kernel asigna un frame nuevo.</td></tr>
+<tr><td>Stack no ejecutable</td><td>Bit NX/permisos en la PTE; ejecutar ahí → fault.</td></tr>
+<tr><td>mmap</td><td>Rango virtual respaldado por archivo; se lee en el fault, se escribe de vuelta si está dirty.</td></tr>
+<tr><td>COW en fork</td><td>Hijo comparte frames con padre marcados solo-lectura; al escribir, el fault copia la página.</td></tr>
+<tr><td>sbrk/malloc barato</td><td>Solo sube el límite del heap; los frames se asignan al primer acceso.</td></tr>
+<tr><td>calloc barato</td><td>Mapear páginas al "frame de ceros" compartido con COW: no hace falta memset.</td></tr>
+<tr><td>Código compartido</td><td>Mismos frames de solo-lectura mapeados en varios procesos (libs, kernel).</td></tr>
+<tr><td>Memoria compartida</td><td>El mismo frame en las tablas de dos procesos con permiso de escritura.</td></tr>
+</table></div>
+
+<h2 id="vf">6. Verdadero/Falso: veredictos y el "porque"</h2>
+<p class="sub">Intentá primero sin mirar. Cada línea: veredicto + palabra clave.</p>
+<div class="vf">
+<h3>Ej. 12 (mecanismos)</h3>
+<ul>
+<li>(a) <b class="v">V</b> · espera de IO/cola. (b) <b class="f">F</b> · cada proceso tiene su espacio virtual, misma dirección → distintos frames. (c) <b class="f">F/matiz</b> · en el trap se guardan los de usuario; en el switch, los callee-saved del kernel. (d) <b class="f">F</b> · las privilegiadas dan trap. (e) <b class="v">V</b> · el scheduler puede reelegir al mismo. (f) <b class="f">F</b> · es convención de la API. (g) <b class="v">V</b>. (h) <b class="f">F</b> · quedan huérfanos, adopta init. (i) <b class="f">F</b> · hay <code>wait</code>/exit status, pipes, archivos. (j) <b class="f">F</b> · corre si <code>execv</code> falla. (k) <b class="v">V</b> · zombie.</li>
+</ul>
+<h3>Ej. 18 (políticas)</h3>
+<ul>
+<li>(a) <b class="f">F</b> · el control vuelve por bloqueo, yield, exit o interrupt. (b) <b class="f">F</b> · SJF es óptimo solo con llegada simultánea; con llegadas distintas y no apropiativo no hay garantía. (c) <b class="v">V</b>. (d) <b class="v">V</b> · sin boost, los CPU-bound quedan abajo. (e) <b class="v">V</b> · contabilizar el tiempo total por nivel evita el "yield antes del quantum".</li>
+</ul>
+<h3>Ej. 3 y 7 (memoria)</h3>
+<ul>
+<li>malloc syscall <b class="f">F</b>; "siempre llama syscall" <b class="f">F</b>; "a veces" <b class="v">V</b>; free idem; tiempo ∝ x <b class="f">F</b>. Modificar base/bounds privilegiado <b class="v">V</b>; un par "por proceso" <b class="v">V</b> como estado guardado (no como registros físicos).</li>
+</ul>
+<h3>Ej. 17 (paginación)</h3>
+<ul>
+<li>(a) <b class="v">V</b>. (b) <b class="f">F</b> · puede ser al revés (PAE) o iguales. (c) <b class="v">V</b>. (d) <b class="v">V</b> · compartida. (e) <b class="f">F</b> · una virtual apunta a un frame. (f) <b class="v">V/matiz</b> · tamaño del espacio sí, pero no todo está mapeado y el kernel usa parte. (g) <b class="v">V</b> · compartir, COW, demand. (h) <b class="f">F</b>. (i) <b class="f">F</b> · uno por proceso (el kernel se replica). (j) <b class="v">V</b> · libres. (k) <b class="f">F</b> · COW. (l) <b class="f">F</b> · con paginación activa todo pasa por la MMU. (m) <b class="f">F</b> · posible pero no único. (n) <b class="v">V</b> · el PD solo ocupa 4 KiB.</li>
+</ul>
+</div>
+
+<h2 id="plan">7. Plan de estudio (lo que dijo el profe)</h2>
+<ol>
+<li>Hoja en blanco, <b>hacé todos los ejercicios sin mirar</b>. Cronometrate.</li>
+<li>Marcá los que dudaste; recién ahí volvé al libro (OSTEP 4–9 para CPU, 13–20 para memoria).</li>
+<li>Repetí solo los marcados, y <b>explicalo en voz alta a un compañero</b>: si no lo podés explicar, no lo sabés.</li>
+<li>Última pasada: fórmulas de esta guía y las tablas de V/F.</li>
+</ol>
+<p class="sub">Hecho para estudiar en grupo. Corregí lo que veas mal y pasalo. ¡Éxitos!</p>
+</main></body></html>

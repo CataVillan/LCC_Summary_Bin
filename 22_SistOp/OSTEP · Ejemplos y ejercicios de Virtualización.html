@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>OSTEP · Ejemplos y ejercicios de Virtualización (caps. 4–23)</title>
+<style>
+:root{--bg:#fafaf7;--fg:#1d1d1b;--mut:#66665f;--card:#fff;--bd:#e2e0d8;--ac:#b4451f;--tip:#fff4e5;--code:#f0eee6;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#171716;--fg:#ecebe6;--mut:#a3a29a;--card:#211f1d;--bd:#36332f;--ac:#f08a5d;--tip:#2e2419;--code:#2a2825}}
+:root[data-theme="dark"]{--bg:#171716;--fg:#ecebe6;--mut:#a3a29a;--card:#211f1d;--bd:#36332f;--ac:#f08a5d;--tip:#2e2419;--code:#2a2825}
+html{scroll-padding-top:env(safe-area-inset-top,0px);scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 Georgia,serif}
+main{max-width:800px;margin:auto;padding:20px 16px 60px}
+h1{font-size:1.9rem;line-height:1.2;margin:.2em 0}
+h2{font-size:1.35rem;margin:2em 0 .4em;border-bottom:2px solid var(--ac);padding-bottom:.2em}
+p,li{margin:.3em 0}
+code{background:var(--code);padding:.05em .35em;border-radius:4px;font:.9em ui-monospace,Menlo,monospace}
+.sub{color:var(--mut)}
+.tag{font:.72rem system-ui,sans-serif;padding:1px 8px;border-radius:99px;border:1px solid var(--ac);color:var(--ac);white-space:nowrap}
+.tag.h{background:var(--ac);color:var(--bg)}
+.ex{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:8px 14px;margin:10px 0}
+.ex b.t{font-family:system-ui,sans-serif}
+.link{font:.85rem system-ui,sans-serif;color:var(--mut)}
+details{margin:.4em 0}summary{cursor:pointer;color:var(--ac);font:.9rem system-ui,sans-serif}
+.tw{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:.92rem}td,th{border:1px solid var(--bd);padding:5px 8px;text-align:left;vertical-align:top}th{background:var(--code)}
+.tip{background:var(--tip);border-left:4px solid var(--ac);padding:8px 14px;border-radius:8px;margin:12px 0}
+</style></head><body><main>
+<h1>Ejemplos y ejercicios de OSTEP: Virtualización</h1>
+<p class="sub">Caps. 4 a 23 según el resumen <code>AllChapters.md</code> (el archivo termina en el cap. 23; el 24 es solo el diálogo/cierre). <span class="tag">resuelto</span> = ejemplo con desarrollo/resultado en el resumen. <span class="tag h">tarea</span> = ejercicio propuesto por el libro (simulador/homework) que no viene resuelto. Cada uno indica con qué ejercicio del práctico se conecta.</p>
+<div class="tip"><b>Cómo usarlo:</b> tapá el resultado, rehacé el ejemplo a mano y recién después abrí "ver resultado". Los ejemplos de los caps. 7 y 22 (marcados con ★) son los clásicos del libro; sus números los agregué de memoria y no están en el resumen, verificalos en el libro.</div>
+
+<h2>Parte I · CPU</h2>
+<div class="ex"><b class="t">Cap. 4 · Estados del proceso</b> <span class="tag">resuelto</span>
+<p>Transiciones: Scheduled (Ready→Running), Descheduled (Running→Ready), I/O initiated (Running→Blocked), I/O completed (Blocked→Ready).</p><p class="link">→ Práctico Ej. 10</p></div>
+
+<div class="ex"><b class="t">Cap. 5 · fork/wait/exec, redirección</b> <span class="tag">resuelto</span>
+<ul><li>fork: padre recibe PID del hijo, hijo recibe 0, error &lt; 0; el orden padre/hijo no está determinado.</li><li>Con <code>wait()</code> el hijo termina antes de que siga el padre.</li><li><code>wc archivo.c &gt; salida.txt</code>: el hijo cierra stdout y abre el destino <i>antes</i> del exec (UNIX asigna el menor fd libre).</li><li><code>grep foo archivo | wc -l</code> con <code>pipe()</code>.</li></ul>
+<p class="link">→ Práctico Ej. 4–9, 12</p>
+<span class="tag h">tarea</span> <code>fork.py</code>: predecir el árbol de procesos para distintas secuencias de fork/exit; y programas que hagan fork+wait, fork+exec y redirección propia.</div>
+
+<div class="ex"><b class="t">Cap. 6 · Limited Direct Execution</b> <span class="tag">resuelto</span>
+<p>Flujo de una syscall: trap → nivel kernel, trap table (configurada al boot) → handler → return-from-trap. Con timer interrupt: el hardware guarda los regs de usuario en el kernel stack (guardado implícito) y <code>swtch</code> guarda los del kernel (explícito). Sin timer, un loop infinito monopoliza la CPU.</p><p class="link">→ Práctico Ej. 11, 12(e)</p>
+<span class="tag h">tarea</span> Medir el costo de una syscall y de un context switch (<code>lmbench</code>-style, con pipes entre dos procesos).</div>
+
+<div class="ex"><b class="t">Cap. 7 ★ · Scheduling clásico</b> <span class="tag">resuelto</span> (valores del libro)
+<ul><li>3 jobs de 10 s llegando juntos, FIFO: turnaround promedio = (10+20+30)/3 = 20.</li><li>Convoy: A=100, B=C=10, FIFO → (100+110+120)/3 = <b>110</b>.</li><li>SJF sobre el mismo caso → (10+20+120)/3 = <b>50</b>.</li><li>B y C llegan en t=10 (A ya corriendo): SJF no apropia (mal), <b>STCF</b> sí → turnaround promedio 50.</li><li>Response time: 3 jobs de 5 s, SJF → (0+5+10)/3 = 5; RR con slice 1 → (0+1+2)/3 = <b>1</b> (pero turnaround peor).</li></ul>
+<p>Con I/O: cada ráfaga de CPU es un "sub-job"; mientras A hace I/O corre B (overlap).</p><p class="link">→ Práctico Ej. 13, 14, 16, 18</p>
+<span class="tag h">tarea</span> <code>scheduler.py</code> con FIFO/SJF/STCF/RR: calcular a mano turnaround y response y verificar con <code>-c</code>; <code>process-run.py</code> para el overlap CPU/IO.</div>
+
+<div class="ex"><b class="t">Cap. 8 · MLFQ</b> <span class="tag">resuelto</span>
+<p>Reglas finales 1–5 (prioridad, RR en el mismo nivel, job nuevo arriba, baja al agotar el allotment sin importar los yields, boost cada S). Problemas que motivan cada regla: starvation → boost; gaming (I/O justo antes del quantum) → mejor contabilidad; cambio de comportamiento → boost. Configuración típica: quanta cortos arriba, largos abajo.</p><p class="link">→ Práctico Ej. 17, 18(d)(e)</p>
+<span class="tag h">tarea</span> <code>mlfq.py</code>: con 2–3 colas, trazar jobs de distinta duración, con y sin boost, con y sin gaming.</div>
+
+<div class="ex"><b class="t">Cap. 9 · Proporcional</b> <span class="tag">resuelto</span>
+<p>A=75 y B=25 tickets → 75 % / 25 % esperado (probabilístico en lottery). Stride: stride ∝ 1/tickets, corre el menor pass value, exacto pero requiere estado global. CFS: menor vruntime, slice = sched_latency / n (mínimo min_granularity), nice −20…19 cambia el peso.</p><p class="tip">El práctico no lo toma, pero podría aparecer como V/F.</p>
+<span class="tag h">tarea</span> <code>lottery.py</code> y <code>stride.py</code>: ¿cómo mejora la fairness al crecer el tiempo de corrida?</div>
+
+<h2>Parte II · Memoria</h2>
+<div class="ex"><b class="t">Cap. 13–14 · Address space y API</b> <span class="tag">resuelto</span>
+<p>Layout: código arriba de todo, heap crece hacia abajo, stack hacia arriba. <code>int *x = malloc(sizeof(int))</code> son dos reservas: el puntero en el stack, el int en el heap. Errores típicos: olvidar reservar, poco espacio (sin +1 para <code>\0</code>), leak, free doble, free de puntero inválido, usar después de liberar. Herramientas: gdb, valgrind.</p><p class="link">→ Práctico Ej. 1, 2, 3</p>
+<span class="tag h">tarea</span> Programas con bugs para depurar con valgrind (<code>null.c</code>, leak, <code>free</code> parcial).</div>
+
+<div class="ex"><b class="t">Cap. 15 · Base y bounds</b> <span class="tag">resuelto</span>
+<p>Espacio de 4 KB cargado en 16 KB: virtual 0 → 16 KB; 1 KB → 17 KB; <b>3000 → 19384</b>; <b>4400 → fault</b>. El código <code>128: movl…, 132: addl…, 135: movl…</code> muestra que cada fetch, load y store se traduce.</p><p class="link">→ Práctico Ej. 4–7</p>
+<span class="tag h">tarea</span> <code>relocation.py</code>: dadas base/bounds y direcciones, decidir cuáles son válidas.</div>
+
+<div class="ex"><b class="t">Cap. 16 · Segmentación</b> <span class="tag">resuelto</span>
+<p>Tabla: Code 32K/2K, Heap 34K/3K, Stack 28K/2K. Virtual 100 (código) → 32868. Virtual 4200 (heap): offset 4200−4096 = 104 → 34K+104 = <b>34920</b>. Stack crece negativo: virtual 15 KB → offset crudo 3 KB − 4 KB = −1 KB → 28K−1K = <b>27 KB</b>. Selección de segmento con los bits altos: <code>Seg = (VA &amp; SEG_MASK) &gt;&gt; SEG_SHIFT</code>, <code>Offset = VA &amp; OFFSET_MASK</code>, si Offset ≥ Bounds → fault.</p><p class="link">→ Práctico Ej. 8</p>
+<span class="tag h">tarea</span> <code>segmentation.py</code>.</div>
+
+<div class="ex"><b class="t">Cap. 17 · Espacio libre</b> <span class="tag">resuelto</span>
+<p>Heap de 30 bytes: 10 libres, 10 usados, 10 libres → 2 nodos en la lista (splitting/coalescing). Heap de 4096 de <code>mmap</code>: un nodo con <code>size = 4096 − sizeof(node_t)</code>. El header guarda size+magic y <code>free</code> usa <code>(header_t*)ptr − 1</code>; pedir N reserva N + header. Libres 10, 30, 20 y pedido de 15: <b>best</b> → 20 (resto 5); <b>worst</b> → 30 (resto 15); <b>first</b> → 30.</p><p class="link">→ Práctico Ej. 9 (mismo método, otros números)</p>
+<span class="tag h">tarea</span> <code>malloc.py</code>: correr best/worst/first con listas ordenadas por tamaño/dirección y con coalescing.</div>
+
+<div class="ex"><b class="t">Cap. 18 · Paginación lineal</b> <span class="tag">resuelto</span>
+<p>Espacio de 64 B, páginas de 16 B, 8 frames. Tabla VP0→PF3, VP1→PF7, VP2→PF5, VP3→PF2. Virtual 21 = <code>010101</code> → VPN 01, offset 0101; VP1→PF7 (111) → <code>1110101</code> = <b>117</b>. Tabla lineal de 32 bits con 4 KB: 2<sup>20</sup> PTE × 4 B = <b>4 MB por proceso</b>. El pseudocódigo de traducción y el trace de un loop muestran las referencias extra a la tabla.</p><p class="link">→ Práctico Ej. 12</p>
+<span class="tag h">tarea</span> <code>paging-linear-translate.py</code>: traducir direcciones con distintos tamaños de espacio/página.</div>
+
+<div class="ex"><b class="t">Cap. 19 · TLB</b> <span class="tag">resuelto</span>
+<p>Arreglo de 10 ints (4 B), páginas de 16 B: patrón <code>miss, hit, hit, miss, hit, hit, hit, miss, hit, hit</code> = <b>70 %</b> de hit rate (localidad espacial). Repetir el recorrido mejora por localidad temporal. LRU en loop de n+1 páginas con TLB de n → 0 % de hits. Flush vs ASID en el context switch. MIPS R4000: VPN 19 bits, ASID 8 bits, TLB por software.</p><p class="link">→ Práctico Ej. 10, 11</p>
+<span class="tag h">tarea</span> <code>tlb.c</code>: medir el costo de un acceso variando el número de páginas tocadas y detectar el tamaño del TLB.</div>
+
+<div class="ex"><b class="t">Cap. 20 · Tablas chicas</b> <span class="tag">resuelto</span>
+<p><b>Páginas de 16 KB:</b> 18 bits de VPN → 1 MB por tabla (4× menos, pero fragmentación interna). <b>Multinivel:</b> espacio de 16 KB, páginas de 64 B → VPN de 8 bits, tabla lineal de 1 KB = 16 páginas de tabla de 16 PTE, directorio de 16 entradas (4 bits). Solo 3 páginas (1 directorio + 2 tablas) en lugar de 16. Traducción de <b>0x3F80</b>: PD index 1111 (15) → PT index 1110 (14) → PFN 55 → <code>(55&lt;&lt;6)+0</code> = <b>0x0DC0</b>. <b>Tres niveles:</b> espacio de 30 bits, páginas de 512 B → 128 PTEs por página → 7 bits por nivel: (7,7,7,9). Costo: 2 accesos extra en un TLB miss.</p><p class="link">→ Práctico Ej. 13, 14, 15</p>
+<span class="tag h">tarea</span> <code>paging-multilevel-translate.py</code> y comparar tamaño de tabla lineal vs multinivel.</div>
+
+<div class="ex"><b class="t">Cap. 21 · Swapping</b> <span class="tag">resuelto</span>
+<p>Present bit; page fault = acceso legal a una página no presente. Handler: buscar frame libre → si no hay, <code>EvictPage()</code> → <code>DiskRead</code> (proceso blocked) → present=1, PFN → reintentar. Tres casos en un TLB miss: válida y presente / válida no presente / inválida. Watermarks HW/LW con un daemon en background y clustering de escrituras. Fig. 21.1: 4 páginas físicas y 8 bloques de swap.</p><p class="link">→ Práctico Ej. 19(b)</p>
+<span class="tag h">tarea</span> <code>vmstat</code> y <code>mem.c</code>: observar swap in/out al pedir más memoria que la RAM.</div>
+
+<div class="ex"><b class="t">Cap. 22 ★ · Políticas de reemplazo</b> <span class="tag">resuelto</span>
+<p><b>AMAT</b> = T<sub>M</sub> + P<sub>miss</sub>·T<sub>D</sub>. Con T<sub>M</sub>=100 ns, T<sub>D</sub>=10 ms: P<sub>miss</sub>=0,1 → ≈ 1 ms; P<sub>miss</sub>=0,001 → ≈ 10,1 µs.<br>Traza 0,1,2,0,1,3,0,3,1,2,1 con 3 frames: <b>OPT</b> 6 hits/5 misses = 54,5 % (los 3 primeros son compulsory); <b>FIFO</b> 36,4 %; <b>LRU</b> iguala a OPT.<br>Belady con FIFO: 1,2,3,4,1,2,5,1,2,3,4,5 empeora al pasar de 3 a 4 frames (LRU tiene stack property).<br>Workloads: sin localidad (todas iguales), 80-20 (LRU mejor), looping secuencial de 50 páginas (LRU y FIFO 0 % incluso con 49 frames; Random mejor).<br>Reloj: use bit, la aguja limpia bits en 1 hasta encontrar uno en 0; se prefiere víctima clean antes que dirty.</p><p class="link">→ Práctico Ej. 19(b); muy probable en V/F</p>
+<details><summary>Hacelo vos: FIFO en la secuencia de Belady</summary><p>Con 3 frames son 9 faults; con 4 frames son 10 faults.</p></details>
+<span class="tag h">tarea</span> <code>paging-policy.py</code>: traza con FIFO, LRU, OPT, Random, CLOCK y variando el tamaño de cache.</div>
+
+<div class="ex"><b class="t">Cap. 23 · VAX/VMS y Linux</b> <span class="tag">resuelto</span>
+<p>VAX: páginas de 512 B → VPN de 23 bits; dos bits altos eligen segmento (P0, P1, S). Página 0 inaccesible (null pointer), kernel mapeado en cada address space. Sin reference bit → se emula con permisos y un trap. <b>Segmented FIFO</b> (RSS por proceso) + listas de segunda oportunidad (clean/dirty) + clustering. Lazy: <b>demand zeroing</b> y <b>COW</b> (read-only en ambos; al escribir, trap y copia). Linux: corte user/kernel en 0xC0000000 (32 bits), kernel logical (<code>kmalloc</code>, mapeo directo, no swappable, apto DMA) vs virtual (<code>vmalloc</code>); 4 niveles con 36 bits de traducción; huge pages 2 MB/1 GB; page cache con 2Q (inactive/active); mmap; NX, ROP, ASLR/KASLR; Meltdown/Spectre y KPTI.</p><p class="link">→ Práctico Ej. 19(a)(c)(d)(e)(f)(g)(i)(j)</p></div>
+
+<h2>Cierre</h2>
+<div class="tip">Si tenés que priorizar: <b>(1)</b> cap. 7–8 con líneas de tiempo a mano, <b>(2)</b> caps. 15–16 y 20 con traducciones numéricas, <b>(3)</b> cap. 19 y 22 (hit rate, AMAT, traza FIFO/LRU/OPT/reloj). Coinciden casi 1 a 1 con los ejercicios del práctico.</div>
+</main></body></html>
